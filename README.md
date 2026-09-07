@@ -2,7 +2,8 @@
 
 LibreTV Next.js 迁移版：免费在线视频聚合搜索与观看平台。基于 Next.js 15（App Router）+ TypeScript + Tailwind CSS，播放内核为 ArtPlayer + hls.js，支持亮暗双主题。
 
-> 📖 **完整文档**：[docs/Home.md](docs/Home.md) · [架构](docs/Architecture.md) · [部署](docs/Deployment.md) · [配置](docs/Configuration.md) · [数据源](docs/Data-Sources.md) · [播放器](docs/Player.md) · [代理与安全](docs/Proxy-Security.md) · [FAQ](docs/FAQ.md)
+> 📖 **完整文档**：[GitHub Wiki](https://github.com/bestZwei/LibreTV-Next/wiki) · [架构](https://github.com/bestZwei/LibreTV-Next/wiki/Architecture) · [部署](https://github.com/bestZwei/LibreTV-Next/wiki/Deployment) · [配置](https://github.com/bestZwei/LibreTV-Next/wiki/Configuration) · [数据源](https://github.com/bestZwei/LibreTV-Next/wiki/Data-Sources) · [首页推荐](https://github.com/bestZwei/LibreTV-Next/wiki/Recommendations) · [播放器](https://github.com/bestZwei/LibreTV-Next/wiki/Player) · [代理与安全](https://github.com/bestZwei/LibreTV-Next/wiki/Proxy-Security) · [FAQ](https://github.com/bestZwei/LibreTV-Next/wiki/FAQ)
+>
 
 ## 核心特性
 
@@ -12,7 +13,7 @@ LibreTV Next.js 迁移版：免费在线视频聚合搜索与观看平台。基�
 - **进度同步**：播放进度与观看历史存于本机 IndexedDB，精确到秒的续播
 - **换源测速**：跨源搜索同名资源并测速排序，一键切换保留集数位置
 - **源测试与订阅**：一键探活数据源；订阅远程源列表（LibreTV-SourceList JSON），可导出分享
-- **豆瓣推荐**：电影 / 剧集分类浏览，服务端直连避免公共 CORS 代理
+- **首页推荐**：豆瓣（电影/剧集分类浏览）、Bangumi 新番放送表或影视榜单（豆瓣周榜 + 百度热播，经 60s API），设置中切换；均服务端直连 + 缓存，Bangumi/榜单免 key 免配置（`60S_API_BASE` 可指向自部署 60s 实例）
 - **PWA**：可安装到桌面 / 主屏幕，亮暗双主题无首屏闪烁
 
 ## 部署
@@ -54,7 +55,7 @@ docker compose pull && docker compose up -d
 `linux/amd64` 与 `linux/arm64` 双架构）。需要固定版本时在 `.env` 中设置
 `LIBRETV_IMAGE=ghcr.io/librespark/libretv:2.0.1`。
 
-> 版本号以 `package.json` 为单一来源，部署后可用 `/api/status` 返回的 `version` 字段核对。详见[部署文档](docs/Deployment.md)。
+> 版本号以 `package.json` 为单一来源，部署后可用 `/api/status` 返回的 `version` 字段核对。详见[部署文档](https://github.com/bestZwei/LibreTV-Next/wiki/Deployment)。
 
 ### 手动运行
 
@@ -70,10 +71,11 @@ PASSWORD=your-password npm start   # 监听 8080
 | --- | --- | --- |
 | `PASSWORD` | 是 | 访问密码；未设置时站点会提示管理员配置 |
 | `PROXY_SECRET` | 否 | 会话/代理签名密钥；不设置时从 PASSWORD 派生（多实例部署建议显式设置） |
-| `DEFAULT_SOURCES` | 否 | 预置采集站（JSON 数组），用户端自动出现且默认勾选，详见[配置文档](docs/Configuration.md) |
+| `DEFAULT_SOURCES` | 否 | 预置采集站（JSON 数组），用户端自动出现且默认勾选，详见[配置文档](https://github.com/bestZwei/LibreTV-Next/wiki/Configuration) |
 | `REQUEST_TIMEOUT` | 否 | 代理上游请求超时（毫秒），默认 8000 |
 | `MAX_RETRIES` | 否 | 代理请求重试次数，默认 1 |
 | `SEARCH_MAX_PAGES` | 否 | 每个搜索源最多抓取的页数（1-50，默认 5）。第一页会读取源站 `pagecount`，实际页数 = min(源站总页数，该值)；页间并行请求，单页失败只丢该页 |
+| `60S_API_BASE` | 否 | 影视榜单推荐源（60s API）实例地址，默认官方公共实例 `https://60s.viki.moe`；有限流，高频使用可[自部署](https://github.com/vikiboss/60s) |
 | `DEBUG` | 否 | 调试日志 |
 
 ## 使用说明
@@ -113,7 +115,7 @@ PASSWORD=your-password npm start   # 监听 8080
 - **管理边界**：订阅源以远端列表为准，单独编辑会在下次同步时被覆盖，单独移除会在重新同步时恢复；如需调整请改远端列表，或直接删除整个订阅（会一并移除其导入的源）；
 - **导出分享**：设置 → 源订阅 / 分享 → 「导出源列表」，把当前全部来源（预置 + 手动 + 订阅，按 URL 去重）导出为上述 JSON。
 
-> 订阅由服务端拉取（经过 SSRF 校验），因此订阅地址无需配置 CORS。完整说明见 [数据源文档](docs/Data-Sources.md#源订阅--分享)。
+> 订阅由服务端拉取（经过 SSRF 校验），因此订阅地址无需配置 CORS。完整说明见 [数据源文档](https://github.com/bestZwei/LibreTV-Next/wiki/Data-Sources)。
 
 ## 开发
 
@@ -133,7 +135,7 @@ npm version patch       # 或 minor / major；会更新 package.json 并打 git 
 git push && git push --tags
 ```
 
-CI 校验通过后自动构建并推送 `ghcr.io/librespark/libretv:<版本>`（详见[部署文档](docs/Deployment.md)）。
+CI 校验通过后自动构建并推送 `ghcr.io/librespark/libretv:<版本>`（详见[部署文档](https://github.com/bestZwei/LibreTV-Next/wiki/Deployment)）。
 
 ## 安全说明
 
@@ -142,9 +144,7 @@ CI 校验通过后自动构建并推送 `ghcr.io/librespark/libretv:<版本>`（
 - 代理内置 SSRF 防护：拒绝内网/保留地址（含 DNS 解析后校验），仅放行 http(s)。
 - 未登录会话仅允许代理图片类目标（豆瓣封面防盗链需要）。
 
-## 延伸项目
-
-基于 LibreTV 生态的衍生作品：
+## 衍生作品
 
 | 项目 | 说明 |
 | --- | --- |
@@ -155,6 +155,8 @@ CI 校验通过后自动构建并推送 `ghcr.io/librespark/libretv:<版本>`（
 | [WarHutTV](https://github.com/OuOumm/WarHutTV) | Go + React 的自托管影视聚合站 |
 | [DecoTV](https://github.com/Decohererk/DecoTV) | 聚合播放站（原 KatelyaTV） |
 | [Joyflix](https://github.com/jeffernn/Joyflix-Mac-Objective-C) | macOS 原生影视聚合客户端（Objective-C） |
+| [MoonCakeTV](https://github.com/MoonCakeTV/MoonCakeTV) | 影视聚合搜索站（Next.js），文件存储、一键脚本部署 |
+| [OrangeTV](https://github.com/djteang/OrangeTV) | 跨平台影视聚合播放器（Next.js），Kvrocks/Redis/Upstash 多存储与多端同步 |
 
 > 旧版 LibreTV（静态 HTML + Express）完整代码见 [backup-2025 分支](https://github.com/LibreSpark/LibreTV/tree/backup-2025)。
 
@@ -162,4 +164,4 @@ CI 校验通过后自动构建并推送 `ghcr.io/librespark/libretv:<版本>`（
 
 本项目不存储、不制作任何视频内容，仅提供第三方公开接口的聚合与播放能力，内容的合法性由对应数据源负责。
 
-<sub>☕ 觉得有用的话，可以到 [AFDIAN](https://afdian.com/a/veehub) 请我喝杯咖啡。</sub>
+☕ 觉得有用的话，可以到 [AFDIAN](https://afdian.com/a/veehub) 请我喝杯咖啡。

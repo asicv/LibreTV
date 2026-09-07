@@ -1,6 +1,6 @@
 'use client';
 
-import type { SearchResponse, VideoDetail, DoubanResponse, AuthStatusResponse, SourceConfig, SearchResultItem } from './types';
+import type { SearchResponse, VideoDetail, DoubanResponse, BangumiCalendarResponse, AuthStatusResponse, SourceConfig, SearchResultItem } from './types';
 
 /**
  * 客户端 API 封装。401 时触发全局事件打开登录框，
@@ -78,6 +78,15 @@ export const api = {
   douban: (type: 'movie' | 'tv', tag: string, pageStart: number, pageSize: number, signal?: AbortSignal) => {
     const sp = new URLSearchParams({ type, tag, pageStart: String(pageStart), pageSize: String(pageSize) });
     return request<DoubanResponse>(`/api/douban?${sp.toString()}`, { signal });
+  },
+
+  /** Bangumi 每日放送（免 key），首页推荐的另一数据源 */
+  bangumiCalendar: (signal?: AbortSignal) => request<BangumiCalendarResponse>('/api/bangumi/calendar', { signal }),
+
+  /** 影视热榜（60s API 免 key）：豆瓣周榜五个类目 + 百度热播剧 */
+  hotList: (id: string, signal?: AbortSignal) => {
+    const sp = new URLSearchParams({ id });
+    return request<DoubanResponse>(`/api/hot-list?${sp.toString()}`, { signal });
   },
 
   /** 换源：按标题跨源搜索并取详情，附带接口耗时（测速） */
