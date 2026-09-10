@@ -91,6 +91,8 @@ export interface AuthStatusResponse {
   defaultSources: SourceConfig[];
   /** 部署者通过 DEFAULT_LIVE_SOURCES 环境变量预置的直播源（未配置时为空数组） */
   defaultLiveSources: LiveSourceConfig[];
+  /** 部署者通过 DEFAULT_SUBSCRIPTIONS 环境变量预置的 SourceList 订阅链接（未配置时为空数组） */
+  defaultSubscriptions: { url: string; name?: string }[];
 }
 
 // —— 直播 / IPTV ——
@@ -141,4 +143,18 @@ export interface LiveEpgResponse {
   current?: EpgProgram;
   next?: EpgProgram;
   programs: EpgProgram[];
+}
+
+// —— 数据源订阅 ——
+
+/**
+ * 远程订阅（LibreTV-SourceList JSON）解析结果。
+ * `sources` 为点播源（Apple CMS 采集站），`liveSources` 为直播源（M3U + 可选 EPG）。
+ * 老格式订阅只有 `sources`，此时 `liveSources` 为空数组。
+ */
+export interface SourceListPayload {
+  /** 订阅列表自带名称 */
+  name?: string;
+  sources: Omit<SourceConfig, 'key'>[];
+  liveSources: Omit<LiveSourceConfig, 'key'>[];
 }
