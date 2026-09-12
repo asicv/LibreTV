@@ -74,6 +74,10 @@ export interface LiveProbeEntry {
   error?: string;
   /** 流编码（master playlist 的 CODECS 属性），用于提示 H.265 等不可解码情况 */
   codec?: string;
+  /** 因超时失败（源可能只是慢），前端以琥珀色区分展示 */
+  timedOut?: boolean;
+  /** 分片吞吐估算（kbps）：低于阈值的源前端标记为「源限速」琥珀色 */
+  kbps?: number;
   /** 测活时间戳（epoch ms），配合 TTL 判断有效性 */
   timestamp: number;
 }
@@ -128,6 +132,10 @@ interface AppState extends AppSettings {
   toggleLiveSelected: (url: string) => void;
   toggleLiveFavorite: (channelUrl: string) => void;
   addLiveRecent: (entry: Omit<LiveRecentEntry, 'timestamp'>) => void;
+  /** 删除单条最近观看（按流 URL） */
+  removeLiveRecent: (channelUrl: string) => void;
+  /** 清空最近观看 */
+  clearLiveRecent: () => void;
   /** 合并写入测活结果，并顺带清理过期条目 */
   setLiveProbeResults: (entries: Record<string, LiveProbeEntry>) => void;
   clearLiveProbeResults: () => void;
@@ -381,6 +389,12 @@ export const useAppStore = create<AppState>()(
         const rest = get().liveRecent.filter((r) => r.url !== entry.url);
         set({ liveRecent: [{ ...entry, timestamp: Date.now() }, ...rest].slice(0, 20) });
       },
+
+      removeLiveRecent: (channelUrl) => {
+        set({ liveRecent: get().liveRecent.filter((r) => r.url !== channelUrl) });
+      },
+
+      clearLiveRecent: () => set({ liveRecent: [] }),
 
       setLiveProbeResults: (entries) => {
         const now = Date.now();
