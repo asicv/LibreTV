@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import Link from 'next/link';
-import { Drawer } from './header';
+import { Drawer } from './drawer';
+import { ConfirmDialog } from './confirm-dialog';
+import { EmptyState, LoadingState } from './states';
 import { db, clearAllHistory, removeHistory, upsertHistory, type HistoryEntry } from '@/lib/db';
 import { buildWatchUrl, buildImageUrl, cn, formatRelativeTime, formatTime } from '@/lib/utils';
 import { useToast } from './toast';
@@ -12,26 +14,26 @@ import { resolveSource, useAppStore } from '@/lib/store';
 /**
  * 观看历史面板（IndexedDB 实时查询）。
  * 与旧版的区别：播放前按需重新拉取剧集详情，不再依赖历史记录里冗余存储的全集 URL。
+ * 破坏性操作分级：清空全部走确认弹窗，删除单条支持撤销。
  */
 
 export function HistoryPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const history = useLiveQuery(() => db.history.orderBy('timestamp').reverse().limit(50).toArray(), [open]);
   const { toast } = useToast();
+  const [confirmClear, setConfirmClear] = useState(false);
 
   return (
     <Drawer open={open} onClose={onClose} title="观看历史" width="max-w-lg">
       {!history ? (
-        <p className="text-center text-faint py-8 text-sm">加载中...</p>
+        <LoadingState />
       ) : history.length === 0 ? (
-        <p className="text-center text-faint py-8 text-sm">暂无观看记录</p>
+        <EmptyState variant="plain" title="暂无观看记录" />
       ) : (
         <>
           <div className="flex justify-end mb-2">
             <button
-              className="text-xs text-faint hover:text-red-400 transition-colors"
-              onClick={() => {
-                clearAllHistory().then(() => toast('观看历史已清空', 'success'));
-              }}
+              className="text-xs text-faint hover:text-danger transition-colors"
+              onClick={() => setConfirmClear(true)}
             >
               清空历史
             </button>
@@ -43,15 +45,34 @@ export function HistoryPanel({ open, onClose }: { open: boolean; onClose: () => 
           </ul>
         </>
       )}
+
+      {/* 重操作：清空不可撤销，先确认并说明数量 */}
+      <ConfirmDialog
+        open={confirmClear}
+        danger
+        title="清空全部观看历史？"
+        message={history ? `将删除 ${history.length} 条观看记录，此操作不可撤销。` : undefined}
+        confirmLabel="清空"
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={() => {
+          void clearAllHistory().then(() => toast('观看历史已清空', 'success'));
+          setConfirmClear(false);
+        }}
+      />
     </Drawer>
   );
 }
 
 function HistoryItem({ item }: { item: HistoryEntry }) {
-  const store = useAppStore();
+  // 精确订阅：整份 useAppStore() 会让每条历史在任意 store 变化（搜索健康度、测活写回等）时重渲染
+  const imageProxyMode = useAppStore((s) => s.imageProxyMode);
+  const customImageProxy = useAppStore((s) => s.customImageProxy);
+  const customAPIs = useAppStore((s) => s.customAPIs);
+  const envSources = useAppStore((s) => s.envSources);
   const { toast } = useToast();
   const [imgFailed, setImgFailed] = useState(false);
-  const pic = buildImageUrl(item.pic, store.imageProxyMode, store.customImageProxy);
+  const source = resolveSource({ customAPIs, envSources }, item.sourceKey);
+  const pic = buildImageUrl(item.pic, imageProxyMode, customImageProxy);
 
   const hasPercent =
     item.playbackPosition > 10 && item.duration > 0 && item.playbackPosition < item.duration * 0.95;
@@ -62,9 +83,34 @@ function HistoryItem({ item }: { item: HistoryEntry }) {
     vodId: item.vodId,
     index: item.episodeIndex,
     title: item.title,
-    sourceUrl: resolveSource(store, item.sourceKey)?.url,
-    detail: resolveSource(store, item.sourceKey)?.detail,
+    sourceUrl: source?.url,
+    detail: source?.detail,
   });
+
+  const remove = () => {
+    void removeHistory(item.sourceKey, item.vodId).then(() => {
+      // 轻操作：给撤销窗口，恢复时写回原记录
+      toast('已删除该记录', 'info', {
+        action: {
+          label: '撤销',
+          onClick: () => {
+            void upsertHistory({
+              sourceKey: item.sourceKey,
+              sourceUrl: item.sourceUrl,
+              vodId: item.vodId,
+              title: item.title,
+              pic: item.pic,
+              episodeIndex: item.episodeIndex,
+              totalEpisodes: item.totalEpisodes,
+              playbackPosition: item.playbackPosition,
+              duration: item.duration,
+              timestamp: item.timestamp,
+            }).then(() => toast('已恢复', 'success'));
+          },
+        },
+      });
+    });
+  };
 
   return (
     <li className="relative group">
@@ -110,14 +156,12 @@ function HistoryItem({ item }: { item: HistoryEntry }) {
       </Link>
       <button
         className={cn(
-          'absolute right-2 top-2 p-1.5 rounded-full text-faint hover:text-red-400',
+          'absolute right-2 top-2 p-2 rounded-full text-faint hover:text-danger',
           'opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity'
         )}
         aria-label="删除记录"
-        title="删除记录"
-        onClick={() => {
-          removeHistory(item.sourceKey, item.vodId).then(() => toast('已删除该记录', 'success'));
-        }}
+        title="删除记录（可在提示中撤销）"
+        onClick={remove}
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

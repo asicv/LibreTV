@@ -23,6 +23,12 @@ export function formatRelativeTime(timestamp: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** 停用时长的可读文案：不足 1 小时按分钟，超过按小时（按剩余时间展示时向上取整） */
+export function formatDisableTtl(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  return minutes >= 60 ? `${Math.round(minutes / 60)} 小时` : `${minutes} 分钟`;
+}
+
 export async function sha256Hex(input: string): Promise<string> {
   const buffer = new TextEncoder().encode(input);
   const hash = await crypto.subtle.digest('SHA-256', buffer);
@@ -56,6 +62,15 @@ export function normalizeSourceUrl(url: string): string {
 
 export function validateSourceUrl(url: string): boolean {
   return /^https?:\/\/.+/.test(url);
+}
+
+/** 取 hostname 作为名称兜底；地址非法时原样返回 */
+export function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
 
 /** 为分享链接等场景构造观看页 URL */

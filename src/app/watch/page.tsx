@@ -6,7 +6,9 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/client-api';
 import { PlayerShell } from '@/components/player-shell';
+import { EmptyState, LoadingState, Spinner } from '@/components/states';
 import { SwitchSourceModal } from '@/components/switch-source';
+import { Icon } from '@/components/icon';
 import { useAuth } from '@/components/auth';
 import { resolveSource, useAppStore } from '@/lib/store';
 import {
@@ -198,7 +200,7 @@ function WatchContent() {
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <button className="btn-ghost !py-1.5 text-xs" onClick={() => setSwitchOpen(true)}>
+            <button className="btn-ghost btn-sm" onClick={() => setSwitchOpen(true)}>
               切换资源
             </button>
           </div>
@@ -223,7 +225,7 @@ function WatchContent() {
               ) : (
                 <div className="w-full h-full flex items-center justify-center">
                   {detailQuery.isLoading ? (
-                    <div className="h-9 w-9 rounded-full border-4 border-line border-t-accent animate-spin" />
+                    <Spinner size="lg" />
                   ) : (
                     <p className="text-faint text-sm">
                       {detailQuery.isError ? '视频加载失败，请尝试其他资源' : '无可用播放地址'}
@@ -236,21 +238,18 @@ function WatchContent() {
             {/* 操作栏 */}
             <div className="flex flex-wrap items-center gap-2 mt-3">
               <button
-                className="btn-ghost !py-1.5 text-xs"
+                className="btn-ghost btn-sm"
                 disabled={currentIndex <= 0}
                 onClick={() => goEpisode(currentIndex - 1)}
               >
                 上一集
               </button>
               <button
-                className="btn-ghost !py-1.5 text-xs"
+                className="btn-ghost btn-sm"
                 disabled={episodes.length === 0 || currentIndex >= episodes.length - 1}
                 onClick={() => goEpisode(currentIndex + 1)}
               >
                 下一集
-              </button>
-              <button className="btn-ghost !py-1.5 text-xs" onClick={() => setReversed((v) => !v)}>
-                {reversed ? '正序排列' : '倒序排列'}
               </button>
               <label className="flex items-center gap-1.5 text-xs text-muted ml-auto cursor-pointer">
                 <input
@@ -266,15 +265,32 @@ function WatchContent() {
 
           {/* 剧集侧栏 */}
           <aside className="bg-surface-raised rounded-lg p-3 h-fit">
-            <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-center justify-between gap-2 mb-2.5">
               <h2 className="text-sm font-semibold text-content">
                 剧集列表{episodes.length > 0 && `（${episodes.length}）`}
               </h2>
+              {/* 排列开关紧贴它所作用的列表：放在这里才看得出它管的是这一栏的顺序 */}
+              {episodes.length > 1 && (
+                <button
+                  className="btn-ghost btn-sm shrink-0"
+                  onClick={() => setReversed((v) => !v)}
+                  aria-label={reversed ? '切换为正序排列' : '切换为倒序排列'}
+                  title="调整剧集列表的排列顺序"
+                >
+                  <Icon
+                    name="arrowDown"
+                    className={cn('w-3.5 h-3.5 transition-transform', reversed && 'rotate-180')}
+                  />
+                  {reversed ? '正序排列' : '倒序排列'}
+                </button>
+              )}
             </div>
             {episodes.length === 0 ? (
-              <p className="text-center text-xs text-faint py-8">
-                {detailQuery.isLoading ? '加载中...' : detailQuery.isError ? '获取剧集失败' : '暂无剧集信息'}
-              </p>
+              detailQuery.isLoading ? (
+                <LoadingState />
+              ) : (
+                <EmptyState variant="plain" title={detailQuery.isError ? '获取剧集失败' : '暂无剧集信息'} />
+              )
             ) : (
               <div className="grid grid-cols-5 lg:grid-cols-4 gap-1.5 max-h-[65vh] overflow-y-auto scrollbar-thin pr-1">
                 {orderedEpisodes.map((realIndex) => (
@@ -318,7 +334,7 @@ function EpisodeButton({ index, active, onClick }: { index: number; active: bool
   return (
     <button
       ref={ref}
-      className={cn('btn !px-1 text-xs !py-1.5', active ? 'episode-active' : 'btn-ghost')}
+      className={cn('btn btn-sm !px-1', active ? 'episode-active' : 'btn-ghost')}
       onClick={onClick}
     >
       {index + 1}
