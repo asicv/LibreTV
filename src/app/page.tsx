@@ -13,9 +13,9 @@ import type { SearchResultItem, SourceSearchOutcome } from '@/lib/types';
 import { SearchHistoryDropdown, useSearchHistory } from '@/components/search-history';
 import { cn, formatDisableTtl, validateSourceUrl } from '@/lib/utils';
 import { useToast } from '@/components/toast';
-import { useAuth } from '@/components/auth';
 import { EmptyState } from '@/components/states';
 import { Icon } from '@/components/icon';
+import { SiteFooter } from '@/components/site-footer';
 
 /**
  * 首页：搜索（URL ?s= 驱动，可后退/分享）+ 豆瓣推荐。
@@ -23,88 +23,6 @@ import { Icon } from '@/components/icon';
  */
 /** 搜索结果分批渲染的批大小：一次挂载上千张卡片会明显掉帧 */
 const RESULT_PAGE_SIZE = 60;
-
-/** 上游仓库最新 tag（即最新版本号），用于页脚的更新检测 */
-const UPSTREAM_TAGS_API = 'https://api.github.com/repos/LibreSpark/LibreTV/tags?per_page=1';
-
-/** 页脚版本号的更新检测结果；null 表示无需检测（本地 dev 构建） */
-type UpstreamUpdate = { status: 'checking' | 'latest' | 'newer'; latest?: string };
-
-/** 点分版本号比较：a 大于 b 返回正数 */
-function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
-  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const diff = (pa[i] || 0) - (pb[i] || 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
-/** 检测上游是否有更新的版本；检测失败或本地构建（dev）时静默返回 null */
-function useUpstreamUpdate(current: string | null): UpstreamUpdate | null {
-  const [state, setState] = useState<UpstreamUpdate | null>({ status: 'checking' });
-  useEffect(() => {
-    if (!current || current === 'dev') {
-      setState(null);
-      return;
-    }
-    // 按当前版本隔离缓存到 sessionStorage：一次会话最多请求一次 GitHub API
-    const cacheKey = `upstream-latest-tag:${current}`;
-    const cached = sessionStorage.getItem(cacheKey);
-    if (cached) {
-      setState(
-        compareVersions(cached, current) > 0
-          ? { status: 'newer', latest: cached }
-          : { status: 'latest' },
-      );
-      return;
-    }
-    let alive = true;
-    fetch(UPSTREAM_TAGS_API)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((tags: { name?: string }[]) => {
-        const name = tags[0]?.name?.replace(/^v/, '');
-        if (!name || !alive) return;
-        try {
-          sessionStorage.setItem(cacheKey, name);
-        } catch {
-          /* 隐私模式等场景下缓存不可写，忽略即可 */
-        }
-        setState(
-          compareVersions(name, current) > 0
-            ? { status: 'newer', latest: name }
-            : { status: 'latest' },
-        );
-      })
-      .catch(() => {
-        /* 网络受限 / 触发 GitHub 限流时静默跳过 */
-        if (alive) setState(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [current]);
-  return state;
-}
-
-/** 页脚仓库链接上的悬停提示：显示更新检测结果 */
-function UpdateTip({ update }: { update: UpstreamUpdate | null }) {
-  const tip =
-    update === null
-      ? null
-      : update.status === 'newer'
-        ? `发现新版本 v${update.latest}`
-        : update.status === 'latest'
-          ? '已是最新版本'
-          : '正在检测更新…';
-  if (!tip) return null;
-  return (
-    <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-line bg-chip px-2 py-1 text-faint shadow-sm group-hover:block">
-      {tip}
-    </span>
-  );
-}
 
 export default function HomePage() {
   return (
@@ -118,10 +36,15 @@ function HomeContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { toast } = useToast();
-  const { version } = useAuth();
-  const upstreamUpdate = useUpstreamUpdate(version);
   const urlQuery = searchParams.get('s') || '';
-  const store = useAppStore();
+  // 精确订阅所需字段（对齐 live 页的做法）：搜索流式期间逐源写健康度、
+  // 打开设置抽屉/历史面板等无关 store 变化，都不应触发首页整树重渲染
+  const customAPIs = useAppStore((s) => s.customAPIs);
+  const envSources = useAppStore((s) => s.envSources);
+  const selectedKeys = useAppStore((s) => s.selectedKeys);
+  const yellowFilter = useAppStore((s) => s.yellowFilter);
+  const sourceHealth = useAppStore((s) => s.sourceHealth);
+  const subscriptions = useAppStore((s) => s.subscriptions);
   const [input, setInput] = useState(urlQuery);
   const [detailItem, setDetailItem] = useState<SearchResultItem | null>(null);
   /** 流式搜索中已结算的源（data 就绪前用于增量渲染） */
@@ -135,46 +58,49 @@ function HomeContent() {
 
   // 源名回显：失败/停用提示里显示友好名称而非裸 key
   const sourceName = (key: string) =>
-    store.customAPIs.find((a) => a.key === key)?.name ??
-    store.envSources.find((a) => a.key === key)?.name ??
+    customAPIs.find((a) => a.key === key)?.name ??
+    envSources.find((a) => a.key === key)?.name ??
     key;
 
   const selectedSources = useMemo(() => {
     // selectedKeys 可能含历史残留的重复 key：按 key 去重，避免同源重复搜索
     const seen = new Set<string>();
-    return store.selectedKeys
-      .map((key) => resolveSource(store, key))
+    return selectedKeys
+      .map((key) => resolveSource({ customAPIs, envSources }, key))
       .filter((s): s is NonNullable<typeof s> => {
         if (!s || !validateSourceUrl(s.url) || seen.has(s.key)) return false;
         seen.add(s.key);
         return true;
       })
       // 自动停用期内的源不参与搜索（到期自动恢复）
-      .filter((s) => !isSourceDisabled(store, s.key))
+      .filter((s) => !isSourceDisabled({ sourceHealth }, s.key))
       // 所属订阅被整体停用的源同样跳过（无损：各源勾选状态保留，重新启用即恢复）
-      .filter((s) => !isInDisabledSubscription(store, s.key));
-  }, [store]);
+      .filter((s) => !isInDisabledSubscription({ subscriptions }, s.key));
+  }, [customAPIs, envSources, selectedKeys, sourceHealth, subscriptions]);
   const disabledSources = useMemo(
-    () => store.selectedKeys.filter((key) => isSourceDisabled(store, key)),
-    [store]
+    () => selectedKeys.filter((key) => isSourceDisabled({ sourceHealth }, key)),
+    [selectedKeys, sourceHealth]
   );
   // 来自已关闭订阅的源：勾选状态还在，但本次搜索用不到，必须明确告知
   const offSubscriptionSources = useMemo(
-    () => store.selectedKeys.filter((key) => !isSourceDisabled(store, key) && isInDisabledSubscription(store, key)),
-    [store]
+    () =>
+      selectedKeys.filter(
+        (key) => !isSourceDisabled({ sourceHealth }, key) && isInDisabledSubscription({ subscriptions }, key)
+      ),
+    [selectedKeys, sourceHealth, subscriptions]
   );
 
   const searchQuery = useQuery({
-    queryKey: ['search', urlQuery, store.selectedKeys, store.yellowFilter],
+    queryKey: ['search', urlQuery, selectedKeys, yellowFilter],
     // 与 runSearch 的截断规则保持一致：顶栏搜索 / 手动构造长链接不会绕过上限
     queryFn: ({ signal }) => {
       setStreamedOutcomes([]);
-      return api.search(urlQuery.slice(0, 100), selectedSources, store.yellowFilter, {
+      return api.search(urlQuery.slice(0, 100), selectedSources, yellowFilter, {
         signal,
         // 逐源结算即更新：结果边搜边渲染，同时滚动健康度
         onSource: (outcome) => {
           setStreamedOutcomes((prev) => [...prev, outcome]);
-          for (const ev of store.recordSourceHealth([outcome])) {
+          for (const ev of useAppStore.getState().recordSourceHealth([outcome])) {
             toast(
               ev.permanent
                 ? `「${sourceName(ev.key)}」多次失败，已停止参与搜索，可在设置中恢复`
@@ -401,7 +327,7 @@ function HomeContent() {
             )}
 
             {selectedSources.length === 0 ? (
-              <NoSourceGuide hasSources={store.customAPIs.length > 0 || store.envSources.length > 0} />
+              <NoSourceGuide hasSources={customAPIs.length > 0 || envSources.length > 0} />
             ) : list.length > 0 ? (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-start">
@@ -448,21 +374,7 @@ function HomeContent() {
         )}
       </main>
 
-      <footer className="border-t border-line py-4">
-        <p className="text-center text-xs text-faint">
-          <a
-            href="https://github.com/LibreSpark/LibreTV"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group relative inline-block cursor-help hover:text-accent"
-          >
-            LibreTV{version ? ` v${version}` : ''}
-            {version && <UpdateTip update={upstreamUpdate} />}
-          </a>
-          {' · '}
-          AGPL-3.0 License
-        </p>
-      </footer>
+      <SiteFooter />
 
       <DetailModal item={detailItem} onClose={() => setDetailItem(null)} />
     </div>

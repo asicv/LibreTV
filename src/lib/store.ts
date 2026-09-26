@@ -1,9 +1,10 @@
 'use client';
 
 import { create } from 'zustand';
-import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type { SourceConfig, LiveSourceConfig, SourceSearchOutcome } from './types';
 import { clearLiveProbeResultsDb, loadLiveProbeResults, saveLiveProbeResults } from './db';
+import { PERSIST_KEY, createThrottledStorage } from './persist-storage';
 
 /**
  * 全局设置（zustand + localStorage 持久化）。
@@ -224,6 +225,8 @@ interface AppState extends AppSettings {
   updateLiveSubscription: (url: string, patch: { name?: string; epg?: string }) => void;
   markLiveSynced: (url: string, name?: string, epg?: string) => void;
   toggleLiveSelected: (url: string) => void;
+  /** 批量启停直播源：一次 set 完成，避免逐条 toggle 的 O(n) 次持久化 */
+  toggleLiveSelectedMany: (urls: string[]) => void;
   toggleLiveFavorite: (channelUrl: string) => void;
   addLiveRecent: (entry: Omit<LiveRecentEntry, 'timestamp'>) => void;
   /** 删除单条最近观看（按流 URL） */
@@ -261,57 +264,9 @@ function nextCustomKey(apiList: SourceConfig[]): string {
 }
 
 /**
- * 节流写入的 localStorage 包装。
- * 搜索会逐源写健康度、测活每 200ms 合并写回，这些都会触发 persist 的整份序列化 + 写盘；
- * 这里把写入合并为 800ms 一次，并在页面隐藏/卸载时立即 flush，确保不丢最后一次修改。
+ * 节流写入的 localStorage 包装已抽至 persist-storage.ts（db.ts 的 importConfig
+ * 需要在直接写盘前 flush 缓冲，而运行时依赖方向是 store → db，不能反向引用）。
  */
-function createThrottledStorage(): StateStorage {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let pending: [string, string] | null = null;
-
-  const flush = () => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    if (!pending) return;
-    const [key, value] = pending;
-    pending = null;
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-      // 配额不足 / 隐私模式下静默放弃持久化，内存态仍可用
-    }
-  };
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') flush();
-    });
-    window.addEventListener('beforeunload', flush);
-  }
-
-  return {
-    getItem: (name) => {
-      try {
-        return localStorage.getItem(name);
-      } catch {
-        return null;
-      }
-    },
-    setItem: (name, value) => {
-      pending = [name, value];
-      if (!timer) timer = setTimeout(flush, 800);
-    },
-    removeItem: (name) => {
-      try {
-        localStorage.removeItem(name);
-      } catch {
-        // 忽略
-      }
-    },
-  };
-}
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -522,13 +477,20 @@ export const useAppStore = create<AppState>()(
             nextByUrl.set(s.url, { ...current, fromSubscriptions: [...current.fromSubscriptions, subUrl] });
           }
         }
-        // 不在本次列表中的条目原样保留；仅当被本订阅唯一持有且本次消失时才移除
+        // 不在本次列表中的条目：摘除本订阅的归属引用（远端已删即不再持有）——
+        // 摘除后仍被其他订阅引用的降级为其引用；不再被任何订阅引用的订阅源随本次同步移除；
+        // 手动添加的源（无订阅归属）由用户完全掌控，不受同步影响
         for (const s of existing) {
           if (nextByUrl.has(s.url)) continue;
-          if (s.fromSubscriptions.includes(subUrl) && s.fromSubscriptions.length === 1) {
-            orphanUrls.add(s.url);
-          } else {
+          if (!s.fromSubscriptions.includes(subUrl)) {
             nextByUrl.set(s.url, s);
+            continue;
+          }
+          const rest = s.fromSubscriptions.filter((u) => u !== subUrl);
+          if (rest.length > 0) {
+            nextByUrl.set(s.url, { ...s, fromSubscriptions: rest });
+          } else {
+            orphanUrls.add(s.url);
           }
         }
 
@@ -608,6 +570,16 @@ export const useAppStore = create<AppState>()(
             ? cur.filter((u) => u !== url)
             : [...cur, url],
         });
+      },
+
+      // 批量启停：一次 set 替代 N 次逐条 toggle（每条都会触发一次完整 persist 序列化）
+      toggleLiveSelectedMany: (urls) => {
+        const cur = get().liveSelectedUrls;
+        let next = cur;
+        for (const url of urls) {
+          next = next.includes(url) ? next.filter((u) => u !== url) : [...next, url];
+        }
+        set({ liveSelectedUrls: next });
       },
 
       markLiveSynced: (url, name, epg) => {
@@ -745,7 +717,7 @@ export const useAppStore = create<AppState>()(
       },
     }),
     {
-      name: 'libretv-settings',
+      name: PERSIST_KEY,
       // 节流写入：搜索 / 测活等高频 set 不再每次都整份序列化写盘
       storage: createJSONStorage(createThrottledStorage),
       // v1：直播源新增归属字段、最近观看新增 sourceUrl。
