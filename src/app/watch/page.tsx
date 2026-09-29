@@ -17,6 +17,7 @@ const PlayerShell = dynamic(() => import('@/components/player-shell').then((m) =
 });
 import { EmptyState, LoadingState, Spinner } from '@/components/states';
 import { SwitchSourceModal } from '@/components/switch-source';
+import { enqueueDownload } from '@/components/download-manager';
 import { Icon } from '@/components/icon';
 import { useAuth } from '@/components/auth';
 import { resolveSource, useAppStore } from '@/lib/store';
@@ -206,6 +207,22 @@ function WatchContent() {
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <button
+              className="btn-ghost btn-sm"
+              onClick={() => {
+                if (!currentUrl) return;
+                enqueueDownload({
+                  url: currentUrl,
+                  // 多集才带集数后缀；单集影片（含电影）文件名就是纯标题
+                  title: `${videoTitle}${episodes.length > 1 ? ` 第${currentIndex + 1}集` : ''}`,
+                  format: 'MP4',
+                });
+                // 「已加入下载队列」由 DownloadManager 在真正入队后提示：
+                // 这里先提示的话，用户随后取消保存位置会出现「已加入→已取消」的矛盾
+              }}
+            >
+              下载本集
+            </button>
             <button className="btn-ghost btn-sm" onClick={() => setSwitchOpen(true)}>
               切换资源
             </button>
@@ -223,6 +240,9 @@ function WatchContent() {
                   title={videoTitle}
                   adFilter={store.adFilter}
                   autoplayNext={store.autoplayNext}
+                  episodeKey={`${sourceKey}:${vodId}:${currentIndex}`}
+                  nextUrl={currentIndex + 1 < episodes.length ? episodes[currentIndex + 1] : undefined}
+                  nextEpisodeKey={currentIndex + 1 < episodes.length ? `${sourceKey}:${vodId}:${currentIndex + 1}` : undefined}
                   getRestorePosition={getRestorePosition}
                   onTimeUpdate={handleProgress}
                   onPause={handleProgress}
